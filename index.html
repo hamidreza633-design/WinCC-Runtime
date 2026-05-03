@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WinCC HMI – Behälter R1001 (Voll Automatisiert)</title>
+<style>
+/* ══════════════════════════════════════════════════════════════
+    RESET & VARIABLES
+══════════════════════════════════════════════════════════════ */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --c-n2:          #FFD700;
+  --c-hcl:         #FF8C00;
+  --c-naoh:        #9B59B6;
+  --c-steam:       #E74C3C;
+  --c-cool:        #27AE60;
+  --c-drain:       #FF8C00;
+  --valve-closed: #cc2200;
+  --valve-open:    #4CAF50;
+  --bg-chrome:     #1e1e1e;
+  --bg-nav:        #252525;
+  --bg-process:    #d2d2d2;
+  --bg-alarm:      #1a1a2a;
+  --bg-alarm-row-odd: #1e1e30;
+  --bg-alarm-row-even:#1a1a28;
+  --alarm-hdr:     #22223a;
+}
+
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background: #111;
+  color: #eee;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ══════════════════════════════════════════════════════════════
+    TOP TITLE BAR & NAV BAR
+══════════════════════════════════════════════════════════════ */
+#top-bar { height: 34px; background: var(--bg-chrome); border-bottom: 1px solid #3a3a3a; display: flex; align-items: center; padding: 0 10px; flex-shrink: 0; }
+.tb-logo    { font-size: 13px; font-weight: 700; color: #009de0; letter-spacing: 2px; margin-right: 8px; }
+.tb-sep     { color: #555; margin-right: 8px; }
+.tb-app     { font-size: 12px; color: #bbb; }
+.tb-icons   { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.tb-icon    { color: #888; font-size: 13px; cursor: pointer; padding: 2px 5px; border-radius: 2px; }
+.tb-icon:hover { background: #333; color: #ccc; }
+.tb-wbtn    { width: 24px; height: 20px; display: flex; align-items: center; justify-content:center; font-size: 12px; cursor: pointer; border-radius: 2px; margin-left: 2px; }
+.tb-min     { background: #444; color: #bbb; }
+.tb-max     { background: #444; color: #bbb; }
+.tb-close   { background: #c0392b; color: #fff; }
+
+#nav-bar { height: 34px; background: var(--bg-nav); border-bottom: 2px solid #333; display: flex; align-items: center; padding: 0 8px; flex-shrink: 0; }
+.nav-home { width: 30px; height: 26px; background: #333; border: 1px solid #555; display: flex; align-items: center; justify-content: center; cursor: pointer; margin-right: 8px; border-radius: 3px; font-size: 15px; }
+.nav-tab { padding: 0 16px; height: 26px; font-size: 12px; background: #2a2a2a; border: 1px solid #444; border-bottom: none; cursor: pointer; color: #bbb; display: flex; align-items: center; }
+.nav-tab.active { background: #0066cc; color: #fff; border-color: #0055bb; }
+#nav-datetime { margin-left: auto; font-size: 12px; color: #999; font-family: 'Courier New', monospace; }
+
+/* ══════════════════════════════════════════════════════════════
+    PROCESS AREA & BEDIENPULT
+══════════════════════════════════════════════════════════════ */
+#process-area { flex: 1; background: var(--bg-process); overflow: hidden; min-height: 0; position: relative; }
+#process-svg { width: 100%; height: 100%; display: block; }
+
+#hmi-controls {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: rgba(30, 30, 30, 0.9);
+    border: 2px solid #555;
+    border-radius: 8px;
+    padding: 15px;
+    width: 280px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    z-index: 100;
+}
+
+.ctrl-row { margin-bottom: 10px; font-size: 14px; font-weight: bold; }
+.ctrl-row span { float: right; }
+
+#status-badge { padding: 2px 6px; border-radius: 3px; background: #F44336; color: white; }
+#step-badge { color: #009de0; }
+
+.btn-group { display: flex; gap: 8px; margin-top: 15px; }
+.btn-hmi { flex: 1; padding: 10px 0; font-weight: bold; border: 1px solid #000; border-radius: 4px; cursor: pointer; color: black; transition: 0.1s; }
+.btn-hmi:active { transform: scale(0.95); }
+#btn-start { background: #4CAF50; color: white; }
+#btn-halt  { background: #FFC107; }
+#btn-stop  { background: #F44336; color: white; }
+
+/* ══════════════════════════════════════════════════════════════
+    SVG COMPONENTS (Pipes, Valves, Agitator)
+══════════════════════════════════════════════════════════════ */
+.pipe { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 6; transition: stroke-dasharray 0.3s; }
+.p-n2    { stroke: var(--c-n2); }
+.p-hcl   { stroke: var(--c-hcl); }
+.p-naoh  { stroke: var(--c-naoh); }
+.p-steam { stroke: var(--c-steam); }
+.p-cool  { stroke: var(--c-cool); }
+.p-drain { stroke: var(--c-drain); }
+
+.pipe.flowing { stroke-dasharray: 22 10; animation: pipe-flow 0.75s linear infinite; }
+@keyframes pipe-flow { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -32; } }
+
+.valve { transition: transform 0.2s; }
+.v-body { fill: var(--valve-closed); stroke: #1a1a1a; stroke-width: 1.5; transition: fill 0.3s ease; }
+.v-center { fill: var(--valve-closed); transition: fill 0.3s ease; }
+.v-stem  { stroke: #555; stroke-width: 2; fill: none; }
+.v-label { font-size: 10px; font-weight: bold; font-family: 'Segoe UI', Arial, sans-serif; }
+
+.valve.is-open .v-body   { fill: var(--valve-open); }
+.valve.is-open .v-center { fill: #1e6f1e; }
+
+.is-spinning { animation: agitator-spin 1s linear infinite; }
+@keyframes agitator-spin { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
+
+/* ══════════════════════════════════════════════════════════════
+    ALARM PANEL
+══════════════════════════════════════════════════════════════ */
+#alarm-area { height: 208px; background: var(--bg-alarm); border-top: 2px solid #2a2a4a; display: flex; flex-direction: column; flex-shrink: 0; }
+#alarm-titlebar { height: 26px; background: var(--alarm-hdr); padding: 0 10px; border-bottom: 1px solid #3a3a5a; display: flex; align-items: center; justify-content: space-between; }
+#alarm-titlebar .atitle { font-size: 12px; color: #bbb; font-weight: 600; }
+.aw-btn { font-size: 11px; color: #888; cursor: pointer; margin-left: 6px; padding: 0 5px; height: 18px; border: 1px solid #3a3a5a; border-radius: 2px; background: #2a2a44; display: inline-flex; align-items: center; }
+#alarm-scroll { flex: 1; overflow-y: auto; }
+#alarm-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+#alarm-table thead th { background: #24243c; color: #999; padding: 3px 8px; border: 1px solid #2e2e50; text-align: left; position: sticky; top: 0; }
+#alarm-table tbody tr:nth-child(odd)  { background: var(--bg-alarm-row-odd); }
+#alarm-table tbody tr:nth-child(even) { background: var(--bg-alarm-row-even); }
+#alarm-table td { padding: 3px 8px; color: #ccc; border: 1px solid #22223a; }
+.st-red    { color: #ff4444; font-weight: bold; }
+.st-yellow { color: #ffaa00; font-weight: bold; }
+.st-blue   { color: #4499ff; font-weight: bold; }
+#alarm-footer { height: 34px; display: flex; align-items: center; gap: 5px; padding: 0 8px; background: #1c1c2e; border-top: 1px solid #2a2a45; }
+.af-btn { padding: 3px 12px; font-size: 11px; border: 1px solid #3a3a5a; border-radius: 2px; background: #28284a; color: #bbb; cursor: pointer; height: 24px; }
+.af-btn.primary { background: #0055aa; color: #fff; border-color: #0077cc; }
+.af-spacer { flex: 1; }
+</style>
+</head>
+<body>
+
+<div id="top-bar">
+  <span class="tb-logo">SIEMENS</span><span class="tb-sep">│</span><span class="tb-app">WinCC</span>
+  <div class="tb-icons">
+    <span class="tb-wbtn tb-min">─</span><span class="tb-wbtn tb-max">□</span><span class="tb-wbtn tb-close">✕</span>
+  </div>
+</div>
+
+<div id="nav-bar">
+  <div class="nav-home">🏠</div>
+  <div class="nav-tab active">Übersicht</div>
+  <div class="nav-tab">Prozess</div>
+  <div id="nav-datetime">00.00.0000  00:00:00</div>
+</div>
+
+<div id="process-area">
+    
+  <!-- BEDIENPULT -->
+  <div id="hmi-controls">
+      <div class="ctrl-row">Status: <span id="status-badge">STOPPED</span></div>
+      <div class="ctrl-row">Schritt: <span id="step-badge">0: Init</span></div>
+      <div class="btn-group">
+          <button id="btn-start" class="btn-hmi">START</button>
+          <button id="btn-halt" class="btn-hmi">HALT</button>
+          <button id="btn-stop" class="btn-hmi">STOP</button>
+      </div>
+  </div>
+
+<svg id="process-svg" viewBox="0 0 1340 622" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <clipPath id="tank-clip"><rect x="475" y="222" width="174" height="266"/></clipPath>
+  <linearGradient id="g-tank" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0%"   stop-color="#a6a6a6"/><stop offset="15%"  stop-color="#d4d4d4"/><stop offset="45%"  stop-color="#efefef"/><stop offset="55%"  stop-color="#f5f5f5"/><stop offset="85%"  stop-color="#d0d0d0"/><stop offset="100%" stop-color="#a0a0a0"/>
+  </linearGradient>
+  <linearGradient id="g-motor" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%"   stop-color="#3a80d2"/><stop offset="100%" stop-color="#103e88"/>
+  </linearGradient>
+  <filter id="f-shadow" x="-8%" y="-5%" width="125%" height="130%"><feDropShadow dx="3" dy="5" stdDeviation="6" flood-color="#00000033"/></filter>
+</defs>
+
+<rect width="1340" height="622" fill="#d0d0d0"/>
+<text x="562" y="42" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="22" font-weight="bold" fill="#003399">Behälter R1001</text>
+
+<!-- ROHRE -->
+<path id="pipe-n2-in" class="pipe p-n2" d="M 168,186 H 475 V 222"/>
+<!-- Abluft verlängert bis Label -->
+<path id="pipe-abluft-a" class="pipe p-n2" d="M 562,198 V 150 H 1063"/>
+<path id="pipe-hcl-in" class="pipe p-hcl" d="M 168,291 H 416 V 386"/>
+<path id="pipe-naoh-solid" class="pipe p-naoh" d="M 168,386 H 282"/>
+<path id="pipe-naoh-mixed" class="pipe p-naoh" stroke-dasharray="11 5" d="M 302,386 H 416"/>
+<path id="pipe-combined" class="pipe" stroke="#bb5500" stroke-width="6" d="M 416,386 H 449"/>
+<path id="pipe-y09-tank" class="pipe p-hcl" d="M 469,386 H 475"/>
+<path id="pipe-steam-fwd" class="pipe p-steam" d="M 650,270 H 1083"/>
+<!-- Dampf Rücklauf verlängert bis Label -->
+<path id="pipe-steam-ret-l" class="pipe p-steam" d="M 650,366 H 1083"/>
+<path id="pipe-cool-fwd" class="pipe p-cool" d="M 650,450 H 1218"/>
+<path id="pipe-cool-ret" class="pipe p-cool" d="M 650,500 H 1218"/>
+<path id="pipe-drain-v" class="pipe p-drain" d="M 562,513 V 562"/>
+<path id="pipe-drain-h" class="pipe p-drain" d="M 582,562 H 726"/>
+<!-- Ablaufleitung ein Stück verlängert -->
+<path id="pipe-drain-out" class="pipe p-drain" d="M 778,562 H 1050"/>
+
+<!-- WÄRMETAUSCHER & KONDENSATOR -->
+<g id="heat-exchanger-ri">
+  <circle cx="955" cy="150" r="20" fill="none" stroke="#333" stroke-width="2"/>
+  <path d="M 940,150 Q 947,135 955,150 T 970,150" fill="none" stroke="#333" stroke-width="2"/>
+</g>
+
+<g id="steam-trap">
+  <circle cx="1060" cy="366" r="8" fill="white" stroke="#333" stroke-width="1.5"/>
+  <text x="1060" y="370" text-anchor="middle" font-size="8" font-weight="bold">K</text>
+</g>
+
+<!-- TANK R1001 -->
+<g id="tank-r1001" filter="url(#f-shadow)">
+  <rect x="475" y="222" width="174" height="266" fill="url(#g-tank)" stroke="#999" stroke-width="2.5"/>
+  <ellipse cx="562" cy="222" rx="87" ry="22" fill="#d6d6d6" stroke="#999" stroke-width="2.5"/>
+  <rect x="510" y="222" width="22" height="266" fill="white" opacity="0.12" pointer-events="none"/>
+  <ellipse cx="562" cy="488" rx="87" ry="22" fill="#c2c2c2" stroke="#888" stroke-width="2.5"/>
+  <path d="M 532,488 L 548,514 L 576,514 L 592,488" fill="#bcbcbc" stroke="#888" stroke-width="2"/>
+  
+  <rect id="tank-level" x="475" y="488" width="174" height="0" fill="#2255cc" opacity="0.48" clip-path="url(#tank-clip)"/>
+  
+  <!-- Tank Beschriftung oben -->
+  <text x="562" y="310" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="20" font-weight="bold" fill="#444">R1001</text>
+  
+  <!-- NEU: Das Messwert-Panel (Halbtransparenter Hintergrund neben dem Rührer) -->
+  <rect x="575" y="325" width="85" height="85" rx="5" fill="rgba(255, 255, 255, 0.85)" stroke="#555" stroke-width="1.5"/>
+
+  <!-- Füllstand, pH, Temp und Druck Anzeige (in das Panel geschoben) -->
+  <text x="580" y="342" text-anchor="start" font-family="'Segoe UI',Arial,sans-serif" font-size="12" font-weight="bold" fill="#111" id="ui-level-text">0 L</text>
+  <text x="580" y="362" text-anchor="start" font-family="'Segoe UI',Arial,sans-serif" font-size="12" font-weight="bold" fill="#111" id="ui-ph-text">pH: 7.0</text>
+  <text x="580" y="382" text-anchor="start" font-family="'Segoe UI',Arial,sans-serif" font-size="12" font-weight="bold" fill="#111" id="ui-temp-text">20.0 °C</text>
+  <text x="580" y="402" text-anchor="start" font-family="'Segoe UI',Arial,sans-serif" font-size="12" font-weight="bold" fill="#111" id="ui-press-text">dp: 0 mbar</text>
+
+  <line x1="504" y1="507" x2="492" y2="556" stroke="#909090" stroke-width="9" stroke-linecap="round"/>
+  <line x1="620" y1="507" x2="632" y2="556" stroke="#909090" stroke-width="9" stroke-linecap="round"/>
+  <rect x="458" y="214" width="18" height="12" rx="1" fill="#ccc" stroke="#999" stroke-width="1.5"/>
+  <rect x="458" y="380" width="18" height="12" rx="1" fill="#ccc" stroke="#999" stroke-width="1.5"/>
+  <rect x="648" y="264" width="18" height="12" rx="1" fill="#ccc" stroke="#999" stroke-width="1.5"/>
+  <rect x="648" y="360" width="18" height="12" rx="1" fill="#ccc" stroke="#999" stroke-width="1.5"/>
+  <rect x="648" y="444" width="18" height="12" rx="1" fill="#ccc" stroke="#999" stroke-width="1.5"/>
+  <rect x="648" y="494" width="18" height="12" rx="1" fill="#ccc" stroke="#999" stroke-width="1.5"/>
+  <rect x="556" y="194" width="12" height="30" rx="2" fill="#ccc" stroke="#999" stroke-width="1.5"/>
+  <rect x="556" y="510" width="12" height="18" rx="1" fill="#ccc" stroke="#999" stroke-width="1.5"/>
+</g>
+
+<!-- MOTOR & AGITATOR -->
+<g id="motor-n02">
+  <ellipse cx="562" cy="162" rx="27" ry="10" fill="url(#g-motor)" stroke="#113088" stroke-width="1.5"/>
+  <rect x="535" y="162" width="54" height="36" fill="url(#g-motor)" stroke="#113088" stroke-width="1.5"/>
+  <ellipse cx="562" cy="198" rx="27" ry="10" fill="#1a4499" stroke="#113088" stroke-width="1.5"/>
+  <text x="562" y="183" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="9" font-weight="bold" fill="white">N02</text>
+  <rect x="558" y="196" width="8" height="28" fill="#888" stroke="#666" stroke-width="1"/>
+</g>
+<g id="agitator-wrapper" transform="translate(562,222)">
+  <g id="agitator" style="transform-origin: 0px 0px;">
+    <line x1="0" y1="0" x2="0" y2="255" stroke="#777" stroke-width="4" stroke-linecap="round"/>
+    <line x1="-52" y1="105" x2="52" y2="105" stroke="#555" stroke-width="5" stroke-linecap="round"/>
+    <line x1="-52" y1="105" x2="-42" y2="135" stroke="#444" stroke-width="3" stroke-linecap="round"/>
+    <line x1="52"  y1="105" x2="42"  y2="135" stroke="#444" stroke-width="3" stroke-linecap="round"/>
+    <line x1="-52" y1="190" x2="52" y2="190" stroke="#555" stroke-width="5" stroke-linecap="round"/>
+    <line x1="-52" y1="190" x2="-42" y2="220" stroke="#444" stroke-width="3" stroke-linecap="round"/>
+    <line x1="52"  y1="190" x2="42"  y2="220" stroke="#444" stroke-width="3" stroke-linecap="round"/>
+  </g>
+</g>
+
+<!-- PUMP P01 -->
+<g id="pump-p01">
+    <circle cx="750" cy="562" r="28" fill="#bcbcbc" stroke="#555" stroke-width="2"/>
+    <polygon id="laufrad-p01" points="750,542 767,577 733,577" fill="#888" stroke="#333"/>
+    <text x="750" y="605" text-anchor="middle" font-size="12" font-weight="bold">P01</text>
+    <text x="750" y="620" text-anchor="middle" font-size="10" fill="#666">Antrieb N01</text>
+</g>
+
+<!-- VENTILE Y01 bis Y09 -->
+<g id="valve-Y01" class="valve" transform="translate(582,562)"><line class="v-stem" x1="0" y1="-15" x2="0" y2="15"/><polygon class="v-body" points="-13,-9 0,0 -13,9"/><polygon class="v-body" points=" 13,-9 0,0 13,9"/><circle class="v-center" cx="0" cy="0" r="3.5"/><text class="v-label" x="0" y="-20" text-anchor="middle" fill="#333">Y01</text></g>
+<g id="valve-Y02" class="valve" transform="translate(336,186)"><line class="v-stem" x1="0" y1="-15" x2="0" y2="15"/><polygon class="v-body" points="-13,-9 0,0 -13,9"/><polygon class="v-body" points=" 13,-9 0,0 13,9"/><circle class="v-center" cx="0" cy="0" r="3.5"/><text class="v-label" x="0" y="-20" text-anchor="middle" fill="#333">Y02</text></g>
+<g id="valve-Y03" class="valve" transform="translate(278,291)"><line class="v-stem" x1="0" y1="-15" x2="0" y2="15"/><polygon class="v-body" points="-13,-9 0,0 -13,9"/><polygon class="v-body" points=" 13,-9 0,0 13,9"/><circle class="v-center" cx="0" cy="0" r="3.5"/><text class="v-label" x="0" y="-20" text-anchor="middle" fill="#333">Y03</text></g>
+<g id="valve-Y04" class="valve" transform="translate(282,386)"><line class="v-stem" x1="0" y1="-15" x2="0" y2="15"/><polygon class="v-body" points="-13,-9 0,0 -13,9"/><polygon class="v-body" points=" 13,-9 0,0 13,9"/><circle class="v-center" cx="0" cy="0" r="3.5"/><text class="v-label" x="0" y="26" text-anchor="middle" fill="#333">Y04</text></g>
+<g id="valve-Y05" class="valve" transform="translate(814,270)"><line class="v-stem" x1="0" y1="-15" x2="0" y2="15"/><polygon class="v-body" points="-13,-9 0,0 -13,9"/><polygon class="v-body" points=" 13,-9 0,0 13,9"/><circle class="v-center" cx="0" cy="0" r="3.5"/><text class="v-label" x="0" y="-20" text-anchor="middle" fill="#333">Y05</text></g>
+<g id="valve-Y06" class="valve" transform="translate(942,248)"><line x1="0" y1="15" x2="0" y2="28" stroke="#E74C3C" stroke-width="6"/><line class="v-stem" x1="0" y1="-15" x2="0" y2="15"/><polygon class="v-body" points="-13,-9 0,0 -13,9"/><polygon class="v-body" points=" 13,-9 0,0 13,9"/><circle class="v-center" cx="0" cy="0" r="3.5"/><text class="v-label" x="0" y="-20" text-anchor="middle" fill="#333">Y06</text></g>
+<g id="valve-Y07" class="valve" transform="translate(988,500)"><line class="v-stem" x1="0" y1="-15" x2="0" y2="15"/><polygon class="v-body" points="-13,-9 0,0 -13,9"/><polygon class="v-body" points=" 13,-9 0,0 13,9"/><circle class="v-center" cx="0" cy="0" r="3.5"/><text class="v-label" x="0" y="26" text-anchor="middle" fill="#333">Y07</text></g>
+<g id="valve-Y08" class="valve" transform="translate(812,150)"><line class="v-stem" x1="0" y1="-15" x2="0" y2="15"/><polygon class="v-body" points="-13,-9 0,0 -13,9"/><polygon class="v-body" points=" 13,-9 0,0 13,9"/><circle class="v-center" cx="0" cy="0" r="3.5"/><text class="v-label" x="0" y="-20" text-anchor="middle" fill="#333">Y08</text></g>
+<g id="valve-Y09" class="valve" transform="translate(449,386)"><line class="v-stem" x1="0" y1="-15" x2="0" y2="15"/><polygon class="v-body" points="-13,-9 0,0 -13,9"/><polygon class="v-body" points=" 13,-9 0,0 13,9"/><circle class="v-center" cx="0" cy="0" r="3.5"/><text class="v-label" x="0" y="-20" text-anchor="middle" fill="#333">Y09</text></g>
+
+<!-- LABEL -->
+<g transform="translate(42,175)"><rect width="126" height="22" rx="3" fill="#FFD700"/><polygon points="118,11 107,4 107,18" fill="#d4b000"/><text x="55" y="15" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="11" font-weight="bold" fill="#222">N2 Leitung</text></g>
+<g transform="translate(42,280)"><rect width="126" height="22" rx="3" fill="#FF8C00"/><polygon points="118,11 107,4 107,18" fill="#d47200"/><text x="55" y="15" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="11" font-weight="bold" fill="white">Zulauf HCL</text></g>
+<g transform="translate(42,375)"><rect width="126" height="22" rx="3" fill="#9B59B6"/><polygon points="126,11 115,4 115,18" fill="#7a3d9a"/><text x="59" y="15" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="11" font-weight="bold" fill="white">Zulauf NaOH</text></g>
+<g transform="translate(1063,139)"><polygon points="0,11 11,4 11,18" fill="#d4b000"/><rect x="11" y="0" width="82" height="22" rx="3" fill="#FFD700"/><text x="55" y="15" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="11" font-weight="bold" fill="#222">Abluft</text></g>
+<g transform="translate(1083,259)"><polygon points="0,11 11,4 11,18" fill="#b02020"/><rect x="11" y="0" width="130" height="22" rx="3" fill="#E74C3C"/><text x="77" y="15" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="11" font-weight="bold" fill="white">Dampf Vorlauf</text></g>
+<g transform="translate(1083,355)"><polygon points="0,11 11,4 11,18" fill="#b02020"/><rect x="11" y="0" width="140" height="22" rx="3" fill="#E74C3C"/><text x="81" y="15" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="11" font-weight="bold" fill="white">Dampf Rücklauf</text></g>
+<g transform="translate(1218,439)"><polygon points="0,11 11,4 11,18" fill="#1a7040"/><rect x="11" y="0" width="150" height="22" rx="3" fill="#27AE60"/><text x="87" y="15" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="11" font-weight="bold" fill="white">Kühlwasser Vorlauf</text></g>
+<g transform="translate(1218,489)"><polygon points="0,11 11,4 11,18" fill="#1a7040"/><rect x="11" y="0" width="160" height="22" rx="3" fill="#27AE60"/><text x="92" y="15" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="11" font-weight="bold" fill="white">Kühlwasser Rücklauf</text></g>
+<!-- Ablaufleitung Label Position angepasst -->
+<g transform="translate(1050,551)">
+  <polygon points="0,11 11,4 11,18" fill="#d47200"/><rect x="11" y="0" width="130" height="22" rx="3" fill="#FF8C00"/>
+  <text x="77" y="15" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="11" font-weight="bold" fill="white">Ablaufleitung</text>
+</g>
+</svg>
+</div>
+
+<!-- ALARMBereich -->
+<div id="alarm-area">
+  <div id="alarm-titlebar"><span class="atitle">Alarm Management</span></div>
+  <div id="alarm-scroll">
+    <table id="alarm-table">
+      <thead><tr><th>Nr.</th><th>Zeit</th><th>Datum</th><th>Status</th><th>Priorität</th><th>Meldung</th><th>Meldetext</th><th>Ort</th><th>Quittiert</th><th>Quittiert von</th></tr></thead>
+      <tbody>
+        <!-- Wird von JS gefüllt -->
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════
+    WINCC SIMULATION - SPS LOGIK (JAVASCRIPT)
+══════════════════════════════════════════════════════════════ */
+
+function setTankLevel(pct) {
+  pct = Math.max(0, Math.min(1, pct));
+  const MAX_H = 266; 
+  const el = document.getElementById('tank-level');
+  if (el) { el.setAttribute('y', 488 - (MAX_H * pct)); el.setAttribute('height', MAX_H * pct); }
+}
+function setValve(id, open) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('is-open', open);
+}
+function setAgitator(spinning) {
+  const el = document.getElementById('agitator');
+  if (el) el.classList.toggle('is-spinning', spinning);
+}
+function setPipeFlowing(pipeId, flowing) {
+  const el = document.getElementById(pipeId);
+  if (el) el.classList.toggle('flowing', flowing);
+}
+
+// -- DIE ANLAGEN VARIABLEN --
+let systemState = "STOPPED"; // STOPPED, RUNNING, PAUSED
+let currentStep = 0;
+let stepTimer = 0;
+
+let currentLevelLiters = 0;
+let currentPH = 7.0;
+let currentTemp = 20.0;
+let currentPressure = 0.0;
+
+// -- ALARM MANAGEMENT --
+let alarms = {
+    "LSHH": { active: false, prio: 1, msg: "High High", text: "Füllstand R1001 extrem hoch (> 1150L)", ort: "R1001", time: "" },
+    "LSLL": { active: false, prio: 3, msg: "Low Low", text: "Füllstand R1001 leer", ort: "R1001", time: "" },
+    "TSHH": { active: false, prio: 1, msg: "Temp High", text: "Temperatur R1001 kritisch (> 75°C)", ort: "R1001", time: "" },
+    "PSHH": { active: false, prio: 2, msg: "Druck High", text: "Differenzdruck zu hoch (> 65 mbar)", ort: "R1001", time: "" }
+};
+
+const stepNames = [
+    "0: Grundstellung",
+    "1: Inertisieren (5s)",
+    "2: Vorlage HCL",
+    "3: Rühren & Heizen",
+    "4: Reaktion NaOH",
+    "5: Kühlen",
+    "6: Entleeren"
+];
+
+const uiStatus = document.getElementById("status-badge");
+const uiStep = document.getElementById("step-badge");
+const uiLevelText = document.getElementById("ui-level-text");
+const uiPhText = document.getElementById("ui-ph-text");
+const uiTempText = document.getElementById("ui-temp-text");
+const uiPressText = document.getElementById("ui-press-text");
+const alarmTbody = document.querySelector("#alarm-table tbody");
+
+setInterval(() => {
+    if (systemState === "RUNNING") {
+        executeSFC(); 
+    }
+    checkAlarms(); 
+    updateUI();
+}, 100);
+
+function executeSFC() {
+    resetOutputs();
+
+    let simulatePID = (setpoint) => setpoint + (Math.random() * 4 - 2);
+
+    switch(currentStep) {
+        case 0:
+            stepTimer = 0;
+            currentPressure = simulatePID(0);
+            break;
+
+        case 1:
+            setValve("valve-Y02", true); setPipeFlowing("pipe-n2-in", true);
+            setValve("valve-Y08", true); setPipeFlowing("pipe-abluft-a", true);
+            currentPressure = simulatePID(50);
+            
+            stepTimer += 100;
+            if (stepTimer >= 5000) { currentStep = 2; stepTimer = 0; }
+            break;
+
+        case 2:
+            setValve("valve-Y02", true); setValve("valve-Y08", true); 
+            setPipeFlowing("pipe-n2-in", true); setPipeFlowing("pipe-abluft-a", true);
+            currentPressure = simulatePID(55);
+            
+            setValve("valve-Y03", true); setPipeFlowing("pipe-hcl-in", true);
+            setValve("valve-Y09", true); setPipeFlowing("pipe-combined", true); setPipeFlowing("pipe-y09-tank", true);
+            
+            currentLevelLiters += 10;
+            currentPH -= 0.1; if(currentPH < 1.5) currentPH = 1.5;
+
+            if (currentLevelLiters >= 700) { currentStep = 3; stepTimer = 0; currentLevelLiters = 700; }
+            break;
+
+        case 3:
+            setAgitator(true);
+            setValve("valve-Y02", true); setValve("valve-Y08", true);
+            
+            setValve("valve-Y05", true); setPipeFlowing("pipe-steam-fwd", true);
+            setValve("valve-Y06", true); setPipeFlowing("pipe-steam-ret-l", true);
+            
+            currentTemp += 0.5;
+            currentPressure = simulatePID(60);
+            
+            if (currentTemp >= 80.0) { currentStep = 4; stepTimer = 0; currentTemp = 80.0; }
+            break;
+
+        case 4:
+            setAgitator(true);
+            setValve("valve-Y02", true); setValve("valve-Y08", true);
+            currentPressure = simulatePID(50);
+            
+            setValve("valve-Y04", true); setPipeFlowing("pipe-naoh-solid", true); setPipeFlowing("pipe-naoh-mixed", true);
+            setValve("valve-Y09", true); setPipeFlowing("pipe-combined", true); setPipeFlowing("pipe-y09-tank", true);
+            
+            currentLevelLiters += 10;
+            currentPH += 0.1; if(currentPH > 7.0) currentPH = 7.0;
+
+            if (currentLevelLiters >= 1200) { currentStep = 5; stepTimer = 0; currentLevelLiters = 1200; }
+            break;
+
+        case 5:
+            setAgitator(true);
+            setValve("valve-Y07", true); setPipeFlowing("pipe-cool-fwd", true); setPipeFlowing("pipe-cool-ret", true);
+            currentPressure = simulatePID(20);
+            
+            currentTemp -= 0.5;
+            if (currentTemp <= 25.0) { currentStep = 6; stepTimer = 0; currentTemp = 25.0; }
+            break;
+
+        case 6:
+            setValve("valve-Y01", true); setPipeFlowing("pipe-drain-v", true); setPipeFlowing("pipe-drain-h", true); setPipeFlowing("pipe-drain-out", true);
+            setValve("valve-Y08", true);
+            document.getElementById("pump-p01").classList.add("pumpe-an");
+            currentPressure = simulatePID(0);
+            
+            currentLevelLiters -= 15;
+            if (currentLevelLiters <= 0) {
+                currentLevelLiters = 0;
+                currentStep = 0;
+                systemState = "STOPPED";
+                document.getElementById("pump-p01").classList.remove("pumpe-an");
+            }
+            break;
+    }
+}
+
+function checkAlarms() {
+    let triggered = false;
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+
+    if (currentLevelLiters > 1150 && !alarms.LSHH.active) { alarms.LSHH.active = true; alarms.LSHH.time = timeStr; triggered = true; }
+    else if (currentLevelLiters <= 1150 && alarms.LSHH.active) { alarms.LSHH.active = false; triggered = true; }
+
+    if (currentLevelLiters <= 10 && currentStep > 2 && currentStep < 6 && !alarms.LSLL.active) { alarms.LSLL.active = true; alarms.LSLL.time = timeStr; triggered = true; }
+    else if ((currentLevelLiters > 10 || currentStep === 0) && alarms.LSLL.active) { alarms.LSLL.active = false; triggered = true; }
+
+    if (currentTemp > 75.0 && !alarms.TSHH.active) { alarms.TSHH.active = true; alarms.TSHH.time = timeStr; triggered = true; }
+    else if (currentTemp <= 75.0 && alarms.TSHH.active) { alarms.TSHH.active = false; triggered = true; }
+
+    if (currentPressure > 65.0 && !alarms.PSHH.active) { alarms.PSHH.active = true; alarms.PSHH.time = timeStr; triggered = true; }
+    else if (currentPressure <= 65.0 && alarms.PSHH.active) { alarms.PSHH.active = false; triggered = true; }
+
+    if (triggered) renderAlarmTable();
+}
+
+function renderAlarmTable() {
+    alarmTbody.innerHTML = ""; 
+    let alarmCount = 1000;
+    const dateStr = new Date().toLocaleDateString('de-DE');
+
+    for (const [key, alarm] of Object.entries(alarms)) {
+        if (alarm.active) {
+            alarmCount++;
+            let prioIcon = alarm.prio === 1 ? '<span class="st-red">▲ AKTIV</span>' : '<span class="st-yellow">⚠ AKTIV</span>';
+            const tr = document.createElement("tr");
+            tr.innerHTML = `<td>${alarmCount}</td><td>${alarm.time}</td><td>${dateStr}</td><td>${prioIcon}</td><td>${alarm.prio}</td><td>${alarm.msg}</td><td>${alarm.text}</td><td>${alarm.ort}</td><td>Nein</td><td>–</td>`;
+            alarmTbody.appendChild(tr);
+        }
+    }
+}
+
+function resetOutputs() {
+    for(let i=1; i<=9; i++) setValve("valve-Y0" + i, false);
+    setAgitator(false);
+    const pipes = ["pipe-n2-in", "pipe-abluft-a", "pipe-hcl-in", "pipe-naoh-solid", "pipe-naoh-mixed", "pipe-combined", "pipe-y09-tank", "pipe-steam-fwd", "pipe-steam-ret-l", "pipe-cool-fwd", "pipe-cool-ret", "pipe-drain-v", "pipe-drain-h", "pipe-drain-out"];
+    pipes.forEach(p => setPipeFlowing(p, false));
+    document.getElementById("pump-p01").classList.remove("pumpe-an");
+}
+
+function updateUI() {
+    if(uiStatus) {
+        uiStatus.innerText = systemState;
+        uiStatus.style.background = systemState === "RUNNING" ? "#4CAF50" : (systemState === "PAUSED" ? "#FFC107" : "#F44336");
+    }
+    if(uiStep) uiStep.innerText = stepNames[currentStep];
+
+    if(uiLevelText) uiLevelText.textContent = Math.round(currentLevelLiters) + " L";
+    if(uiPhText) uiPhText.textContent = "pH: " + currentPH.toFixed(1);
+    if(uiTempText) uiTempText.textContent = currentTemp.toFixed(1) + " °C";
+    if(uiPressText) uiPressText.textContent = "dp: " + Math.max(0, currentPressure).toFixed(0) + " mbar"; 
+
+    setTankLevel(currentLevelLiters / 2400);
+
+    if(systemState === "STOPPED") {
+        resetOutputs();
+    }
+}
+
+document.getElementById("btn-start").addEventListener("click", () => {
+    if (systemState === "STOPPED") { currentStep = 1; systemState = "RUNNING"; renderAlarmTable(); } 
+    else if (systemState === "PAUSED") { systemState = "RUNNING"; }
+});
+document.getElementById("btn-halt").addEventListener("click", () => {
+    if (systemState === "RUNNING") systemState = "PAUSED";
+});
+document.getElementById("btn-stop").addEventListener("click", () => {
+    systemState = "STOPPED"; currentStep = 0; currentLevelLiters = 0; currentPH = 7.0; currentTemp = 20.0; currentPressure = 0; stepTimer = 0;
+    renderAlarmTable();
+});
+
+setInterval(() => {
+  const n = new Date(); const pad = v => String(v).padStart(2, '0');
+  document.getElementById('nav-datetime').innerHTML = `${pad(n.getDate())}.${pad(n.getMonth()+1)}.${n.getFullYear()} &nbsp; ${pad(n.getHours())}:${pad(n.getMinutes())}:${pad(n.getSeconds())}`;
+}, 1000);
+
+renderAlarmTable();
+</script>
+</body>
+</html>
